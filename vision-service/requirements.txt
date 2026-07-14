@@ -1,0 +1,18 @@
+# --- Web framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+httpx==0.28.1
+
+# --- Database (vision-service own Postgres: jobs + detection events) ---
+SQLAlchemy==2.0.36
+psycopg2-binary==2.9.10
+
+# --- Computer vision & ML ---
+# ultralytics pulls in torch, opencv-python-headless, numpy, etc.
+# Use opencv-python-headless to avoid GUI deps in containers.
+ultralytics==8.3.55
+opencv-python-headless==4.10.0.84
+numpy==1.26.4

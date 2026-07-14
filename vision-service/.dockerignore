@@ -1,0 +1,40 @@
+# Version control & virtualenvs
+.git
+.gitignore
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Tooling / caches
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+*.egg-info
+
+# Environment & local files
+.env
+.env.*
+!.env.example
+
+# Docs & CI
+*.md
+!README.md
+Dockerfile
+.dockerignore
+docker-compose.yml
+.github
+
+# Tests not needed in runtime image
+tests
+
+# Downloaded model weights / run artifacts (mount these as volumes instead)
+*.pt
+*.onnx
+*.engine
+runs/

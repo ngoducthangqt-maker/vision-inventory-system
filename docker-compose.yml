@@ -1,0 +1,128 @@
+# docker-compose.yml — full vision + inventory stack.
+#
+# Brings up the complete "Camera -> YOLO -> Inventory API -> Postgres" system:
+#   * inventory-postgres : Postgres for inventory-service (inventory_items)
+#   * vision-postgres    : Postgres for vision-service (detection_jobs/events)
+#   * inventory-service  : FastAPI CRUD + restock/consume REST API
+#   * vision-service     : FastAPI YOLO11 counting -> inventory REST -> audit DB
+#
+# Usage:
+#   docker compose up --build
+#
+# Then:
+#   # 1) seed sample inventory items (CARTON-001, PALLET-001)
+#   python inventory-service/scripts/seed_items.py
+#   # 2) (optional) demo-count from a video file or RTSP
+#   python vision-service/scripts/demo_count.py --source /path/to/video.mp4 --model-path weights/best.pt
+#
+# Services:
+#   inventory-service docs : http://localhost:8000/docs
+#   vision-service docs    : http://localhost:8001/docs
+
+version: "3.9"
+
+services:
+  # ----------------------------------------------------------------- #
+  # Postgres for inventory-service                                     #
+  # ----------------------------------------------------------------- #
+  inventory-postgres:
+    image: postgres:16-alpine
+    container_name: inventory-postgres
+    environment:
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: inventory
+      POSTGRES_DB: inventory_db
+    ports:
+      - "5433:5432"  # host 5433 to avoid clashing with vision-postgres
+    volumes:
+      - inventory_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory -d inventory_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ----------------------------------------------------------------- #
+  # inventory-service (FastAPI + SQLAlchemy + Postgres)                #
+  # ----------------------------------------------------------------- #
+  inventory-service:
+    build: ./inventory-service
+    container_name: inventory-service
+    depends_on:
+      inventory-postgres:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: production
+      POSTGRES_HOST: inventory-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: inventory
+      POSTGRES_DB: inventory_db
+      CORS_ORIGINS: "*"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); sys.exit(0)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ----------------------------------------------------------------- #
+  # Postgres for vision-service                                        #
+  # ----------------------------------------------------------------- #
+  vision-postgres:
+    image: postgres:16-alpine
+    container_name: vision-postgres
+    environment:
+      POSTGRES_USER: vision
+      POSTGRES_PASSWORD: vision
+      POSTGRES_DB: vision_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - vision_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vision -d vision_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ----------------------------------------------------------------- #
+  # vision-service (FastAPI + YOLO11 + OpenCV + httpx + Postgres)      #
+  # ----------------------------------------------------------------- #
+  vision-service:
+    build: ./vision-service
+    container_name: vision-service
+    depends_on:
+      inventory-service:
+        condition: service_healthy
+      vision-postgres:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: production
+      INVENTORY_SERVICE_URL: http://inventory-service:8000
+      INVENTORY_API_PREFIX: /api/v1
+      POSTGRES_HOST: vision-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: vision
+      POSTGRES_PASSWORD: vision
+      POSTGRES_DB: vision_db
+      DEFAULT_MODEL_PATH: weights/best.pt
+      DEFAULT_CARTON_CLASS_NAMES: carton,box
+      CORS_ORIGINS: "*"
+    ports:
+      - "8001:8001"
+    # Mount model weights read-only (place your fine-tuned YOLO11 weights here).
+    volumes:
+      - ./vision-service/weights:/app/weights:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3); sys.exit(0)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  inventory_pgdata:
+  vision_pgdata:
