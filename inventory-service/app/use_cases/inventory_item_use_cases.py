@@ -157,10 +157,9 @@ class InventoryItemUseCases:
 
     async def consume_item(self, item_id: UUID, amount: int) -> InventoryItem:
         item = await self._repo.get_by_id(item_id)
-        try:
-            item.consume(amount)
-        except ValueError as exc:
-            raise ConsumeExceedsStockError(item.sku, amount, item.quantity) from exc
+        if amount > item.quantity:
+            raise ConsumeExceedsStockError(item.sku, amount, item.quantity)
+        item.consume(amount)
         return await self._repo.update(item)
 
 

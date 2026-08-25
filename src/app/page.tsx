@@ -6,6 +6,7 @@ import { Boxes, Camera, Database, Layers, Package, Play, RefreshCw, Square, Tras
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
@@ -158,7 +159,9 @@ export default function Page() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [eventsByJob, setEventsByJob] = useState<Record<string, DetectionEvent[]>>({});
+  const [eventsErrorByJob, setEventsErrorByJob] = useState<Record<string, string | null>>({});
   const [loading, setLoading] = useState(true);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -169,8 +172,10 @@ export default function Page() {
       const [inv, jb] = await Promise.all([listInventory(), listJobs()]);
       setItems(inv.items);
       setJobs(jb.jobs);
+      setConnectionError(null);
     } catch (err) {
-      // Silent on background polls; toast on first load.
+      const message = err instanceof Error ? err.message : String(err);
+      setConnectionError(message);
       if (loading) toast.error("Cannot reach services", { description: err instanceof Error ? err.message : String(err) });
     } finally {
       setLoading(false);
@@ -179,6 +184,7 @@ export default function Page() {
 
   // Initial load + polling while there are running/pending jobs.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshAll();
   }, [refreshAll]);
 
@@ -202,9 +208,19 @@ export default function Page() {
     let cancelled = false;
     listEvents(expandedJob)
       .then((r) => {
-        if (!cancelled) setEventsByJob((prev) => ({ ...prev, [expandedJob]: r.events }));
+        if (!cancelled) {
+          setEventsByJob((prev) => ({ ...prev, [expandedJob]: r.events }));
+          setEventsErrorByJob((prev) => ({ ...prev, [expandedJob]: null }));
+        }
       })
-      .catch(() => {});
+      .catch((err) => {
+        if (!cancelled) {
+          setEventsErrorByJob((prev) => ({
+            ...prev,
+            [expandedJob]: err instanceof Error ? err.message : String(err),
+          }));
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -237,6 +253,11 @@ export default function Page() {
     try {
       await deleteJob(id);
       setEventsByJob((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setEventsErrorByJob((prev) => {
         const next = { ...prev };
         delete next[id];
         return next;
@@ -295,6 +316,12 @@ export default function Page() {
 
       {/* Main content */}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+        {connectionError && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertTitle>Connection problem</AlertTitle>
+            <AlertDescription>Data may be stale. {connectionError}</AlertDescription>
+          </Alert>
+        )}
         {/* KPI cards */}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <KpiCard label="Carton stock" value={cartonItem?.quantity ?? 0} icon={<Package className="h-4 w-4" />} tone="text-amber-600" />
@@ -378,6 +405,7 @@ export default function Page() {
                   {jobs.map((job) => {
                     const expanded = expandedJob === job.id;
                     const events = eventsByJob[job.id] ?? [];
+                    const eventsError = eventsErrorByJob[job.id];
                     return (
                       <div key={job.id} className="rounded-lg border bg-card">
                         <button
@@ -421,7 +449,9 @@ export default function Page() {
                                 <h4 className="text-xs font-semibold uppercase text-muted-foreground">Detection events (audit trail)</h4>
                                 <span className="text-[11px] text-muted-foreground">{events.length} reports</span>
                               </div>
-                              {events.length === 0 ? (
+                              {eventsError ? (
+                                <p className="py-4 text-center text-xs text-destructive">{eventsError}</p>
+                              ) : events.length === 0 ? (
                                 <p className="py-4 text-center text-xs text-muted-foreground">No reports sent yet.</p>
                               ) : (
                                 <div className="max-h-48 space-y-1.5 overflow-y-auto">

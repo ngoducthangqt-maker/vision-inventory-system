@@ -231,6 +231,15 @@ class DetectionPipeline:
                     delta,
                     exc,
                 )
+            except Exception as exc:  # noqa: BLE001 - one target must not abort the whole report
+                status = EventStatus.failed
+                error = str(exc)
+                logger.exception(
+                    "Job %s target %s: unexpected upstream failure (delta=%d)",
+                    self._job.id,
+                    target.name,
+                    delta,
+                )
 
             # Persist an audit event for this report attempt (success or fail).
             self._persist_event(
@@ -325,8 +334,12 @@ class DetectionPipeline:
     # ------------------------------------------------------------------ #
     def _cleanup(self) -> None:
         if self._source is not None:
-            self._source.release()
-            self._source = None
+            try:
+                self._source.release()
+            except Exception:  # noqa: BLE001 - cleanup must always finish
+                logger.exception("Job %s: failed to release video source", self._job.id)
+            finally:
+                self._source = None
         # Drop detector to release GPU/CPU memory held by the model.
         self._detector = None
         self._job.stopped_at = _utcnow()

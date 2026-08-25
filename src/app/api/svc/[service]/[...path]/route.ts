@@ -56,6 +56,7 @@ async function forward(
   }
 
   let upstream: Response;
+  let responseText: string;
   try {
     upstream = await fetch(url, {
       method: req.method,
@@ -63,6 +64,7 @@ async function forward(
       body,
       cache: "no-store",
     });
+    responseText = await upstream.text();
   } catch (exc) {
     const message = exc instanceof Error ? exc.message : String(exc);
     return NextResponse.json(
@@ -74,7 +76,6 @@ async function forward(
   }
 
   // Pass the body through verbatim and preserve the status code.
-  const responseText = await upstream.text();
   const responseHeaders = new Headers();
   const upstreamContentType = upstream.headers.get("content-type");
   if (upstreamContentType) {
