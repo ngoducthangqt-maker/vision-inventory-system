@@ -41,10 +41,12 @@ class InventoryClient:
         *,
         api_prefix: str = "/api/v1",
         timeout_seconds: float = 10.0,
+        api_key: str = "",
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_prefix = api_prefix.rstrip("/")
         self.timeout = timeout_seconds
+        self.api_key = api_key
 
     # ------------------------------------------------------------------ #
     # URL helpers                                                         #
@@ -53,7 +55,8 @@ class InventoryClient:
         return f"{self.base_url}{self.api_prefix}{path}"
 
     def _client(self) -> httpx.Client:
-        return httpx.Client(timeout=self.timeout)
+        headers = {"X-API-Key": self.api_key} if self.api_key else None
+        return httpx.Client(timeout=self.timeout, headers=headers)
 
     # ------------------------------------------------------------------ #
     # Public API                                                          #

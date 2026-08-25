@@ -10,12 +10,13 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.config import get_settings
 from app.core.database import dispose_db, init_db
+from app.core.security import require_api_key
 from app.services.job_manager import get_job_manager
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,12 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         settings.inventory_service_url,
         settings.postgres_db,
     )
+
+    if not settings.api_key.strip():
+        logger.warning(
+            "API_KEY is not set: the API is unauthenticated and will reject "
+            "every request when ENVIRONMENT=production."
+        )
 
     # Create DB tables in non-production mode (use Alembic in production).
     if settings.environment != "production":
@@ -66,21 +73,27 @@ def create_app() -> FastAPI:
             "inventory-service via REST, and persists detection events to "
             "Postgres. Data flow: Camera -> YOLO -> Inventory API -> Postgres."
         ),
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        docs_url="/docs" if settings.docs_enabled else None,
+        redoc_url="/redoc" if settings.docs_enabled else None,
+        openapi_url="/openapi.json" if settings.docs_enabled else None,
         lifespan=lifespan,
     )
 
+    cors_origins = settings.cors_origins_list
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=cors_origins,
+        # Credentials cannot be combined with a wildcard origin.
+        allow_credentials="*" not in cors_origins,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key"],
     )
 
-    app.include_router(api_router, prefix=settings.api_v1_prefix)
+    app.include_router(
+        api_router,
+        prefix=settings.api_v1_prefix,
+        dependencies=[Depends(require_api_key)],
+    )
 
     @app.get("/health", tags=["health"], summary="Liveness probe")
     async def health() -> dict[str, str]:
@@ -91,9 +104,7 @@ def create_app() -> FastAPI:
         return {
             "service": settings.app_name,
             "version": settings.app_version,
-            "docs": "/docs",
-            "inventory_service": settings.inventory_service_url,
-            "database": settings.postgres_db,
+            "docs": "/docs" if settings.docs_enabled else "disabled",
         }
 
     return app

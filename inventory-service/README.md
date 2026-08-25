@@ -145,7 +145,9 @@ All settings come from environment variables (see `.env.example`). Key ones:
 | `POSTGRES_HOST`     | `localhost`    | Database host                        |
 | `POSTGRES_PORT`     | `5432`         | Database port                        |
 | `POSTGRES_USER`     | `inventory`    | DB user                              |
-| `POSTGRES_PASSWORD` | `inventory`    | DB password                          |
+| `POSTGRES_PASSWORD` | _(unset)_      | DB password                          |
 | `POSTGRES_DB`       | `inventory_db` | DB name                              |
 | `ENVIRONMENT`       | `development`  | `development` auto-creates tables    |
-| `CORS_ORIGINS`      | `*`            | Comma-separated allowed origins      |
+| `CORS_ORIGINS`      | `http://localhost:3000` | Comma-separated allowed origins (`*` ignored in production) |
+| `API_KEY`           | _(unset)_      | Secret required in `X-API-Key` on every `/api/v1` request; unset in production makes the API return `503` |
+| `ENABLE_DOCS`       | _(unset)_      | Force `/docs`, `/redoc`, `/openapi.json` on/off (off in production by default) |
