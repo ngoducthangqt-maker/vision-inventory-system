@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.clients.inventory_client import InventoryClientError, ItemNotFoundError
 from app.config import Settings, get_settings
@@ -23,6 +25,7 @@ from app.schemas.job_schema import (
 from app.services.job_manager import JobManager, JobNotFoundError, get_job_manager
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+logger = logging.getLogger(__name__)
 
 
 def _to_target_response(job, target) -> CountingTargetResponse:  # type: ignore[no-untyped-def]
@@ -160,7 +163,10 @@ async def get_job(
 @router.get(
     "/{job_id}/events",
     response_model=DetectionEventsListResponse,
-    responses={404: {"description": "Job not found."}},
+    responses={
+        404: {"description": "Job not found."},
+        503: {"description": "Detection event store unavailable."},
+    },
     summary="List detection events (reports sent to inventory-service)",
 )
 async def list_job_events(
@@ -174,7 +180,14 @@ async def list_job_events(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job {job_id} not found.",
         ) from None
-    rows = manager.list_events(job_id)
+    try:
+        rows = manager.list_events(job_id)
+    except SQLAlchemyError as exc:
+        logger.exception("Failed to list detection events for job %s", job_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Detection event store unavailable: {exc}",
+        ) from None
     return DetectionEventsListResponse(
         events=[_event_to_response(r) for r in rows],
         total=len(rows),

@@ -10,12 +10,18 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
 from app.core.database import dispose_db, init_db
+from app.domain.repositories.inventory_item_repository import InventoryItemNotFoundError
+from app.infrastructure.repositories.inventory_item_repository_impl import DuplicateSkuError
 from app.presentation.api.router import api_v1_router
+from app.use_cases.inventory_item_use_cases import SkuAlreadyExistsError
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -68,6 +74,39 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(ValidationError)
+    async def handle_internal_validation_error(
+        request: Request, exc: ValidationError
+    ) -> JSONResponse:
+        # A pydantic failure outside request parsing is a server-side defect;
+        # it must not be reported to the client as a validation error.
+        logger.exception("Internal validation error")
+        return JSONResponse(status_code=500, content={"detail": "Internal server error."})
+
+    @app.exception_handler(ValueError)
+    async def handle_value_error(request: Request, exc: ValueError) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    @app.exception_handler(SkuAlreadyExistsError)
+    @app.exception_handler(DuplicateSkuError)
+    async def handle_duplicate_sku(
+        request: Request, exc: SkuAlreadyExistsError | DuplicateSkuError
+    ) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    @app.exception_handler(InventoryItemNotFoundError)
+    async def handle_item_not_found(
+        request: Request, exc: InventoryItemNotFoundError
+    ) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(SQLAlchemyError)
+    async def handle_database_error(
+        request: Request, exc: SQLAlchemyError
+    ) -> JSONResponse:
+        logger.exception("Database unavailable")
+        return JSONResponse(status_code=503, content={"detail": "Database unavailable."})
 
     app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
 

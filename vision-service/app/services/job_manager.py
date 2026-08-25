@@ -201,6 +201,8 @@ def get_job_manager() -> JobManager:
                         repo = JobRepository()
                     except Exception:  # noqa: BLE001
                         logger.exception("JobRepository unavailable; running without DB persistence.")
+                        if settings.environment == "production":
+                            raise
                         repo = None
                 _job_manager = JobManager(settings, client, repo)
     return _job_manager

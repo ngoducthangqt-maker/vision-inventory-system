@@ -110,9 +110,10 @@ class SqlAlchemyInventoryItemRepository(InventoryItemRepository):
         stmt = select(InventoryItemModel).where(InventoryItemModel.id == item_id)
         result = await self._session.execute(stmt)
         row = result.scalar_one_or_none()
-        if row is not None:
-            await self._session.delete(row)
-            await self._session.flush()
+        if row is None:
+            raise InventoryItemNotFoundError(item_id)
+        await self._session.delete(row)
+        await self._session.flush()
 
     # ------------------------------------------------------------------ #
     # Read operations                                                     #

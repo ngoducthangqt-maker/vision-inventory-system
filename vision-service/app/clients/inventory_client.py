@@ -55,6 +55,15 @@ class InventoryClient:
     def _client(self) -> httpx.Client:
         return httpx.Client(timeout=self.timeout)
 
+    def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        try:
+            with self._client() as client:
+                return client.request(method, url, **kwargs)
+        except httpx.HTTPError as exc:
+            raise InventoryClientError(
+                f"inventory-service request failed ({method} {url}): {exc}"
+            ) from exc
+
     # ------------------------------------------------------------------ #
     # Public API                                                          #
     # ------------------------------------------------------------------ #
@@ -64,24 +73,35 @@ class InventoryClient:
         The inventory-service has no ``GET by SKU`` endpoint, so we fetch the
         list (with a generous limit) and match on ``sku``.
         """
-        with self._client() as client:
-            response = client.get(self._url("/inventory-items"), params={"limit": 200})
+        response = self._request(
+            "GET", self._url("/inventory-items"), params={"limit": 200}
+        )
         if response.status_code >= 400:
             raise InventoryClientError(
                 f"Failed to list inventory items: {response.status_code} {response.text}",
                 status_code=response.status_code,
             )
-        payload = response.json()
-        items: list[dict[str, Any]] = payload.get("items", [])
-        for item in items:
-            if item.get("sku") == sku:
-                return UUID(str(item["id"]))
+        try:
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise ValueError("payload must be an object")
+            items = payload.get("items", [])
+            if not isinstance(items, list):
+                raise ValueError("'items' must be a list")
+            for item in items:
+                if not isinstance(item, dict):
+                    raise ValueError("item must be an object")
+                if item.get("sku") == sku:
+                    return UUID(str(item["id"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise InventoryClientError(
+                "unexpected response payload from inventory-service"
+            ) from exc
         raise ItemNotFoundError(f"No inventory item with sku={sku!r}.")
 
     def ensure_item_exists(self, item_id: UUID) -> None:
         """Verify that ``item_id`` exists in inventory-service."""
-        with self._client() as client:
-            response = client.get(self._url(f"/inventory-items/{item_id}"))
+        response = self._request("GET", self._url(f"/inventory-items/{item_id}"))
         if response.status_code == 404:
             raise ItemNotFoundError(f"Inventory item with id={item_id} not found.")
         if response.status_code >= 400:
@@ -105,11 +125,11 @@ class InventoryClient:
     def _post_amount(self, item_id: UUID, action: str, amount: int) -> dict[str, Any]:
         if amount <= 0:
             raise ValueError("amount must be a positive integer.")
-        with self._client() as client:
-            response = client.post(
-                self._url(f"/inventory-items/{item_id}/{action}"),
-                json={"amount": amount},
-            )
+        response = self._request(
+            "POST",
+            self._url(f"/inventory-items/{item_id}/{action}"),
+            json={"amount": amount},
+        )
         if response.status_code == 404:
             raise ItemNotFoundError(
                 f"Inventory item with id={item_id} not found during {action}."
