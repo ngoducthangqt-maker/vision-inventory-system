@@ -40,6 +40,7 @@ import httpx
 
 DEFAULT_VISION_URL = os.environ.get("VISION_SERVICE_URL", "http://localhost:8001")
 API_PREFIX = "/api/v1"
+API_KEY = os.environ.get("API_KEY", "")
 
 
 def _build_targets(args: argparse.Namespace) -> list[dict]:
@@ -136,7 +137,8 @@ def main() -> int:
     print(f"  targets: carton (sku={args.carton_sku}, mode={args.carton_mode}), "
           f"pallet (sku={args.pallet_sku}, mode={args.pallet_mode})")
 
-    with httpx.Client(base_url=args.vision_url, timeout=15.0) as client:
+    headers = {"X-API-Key": API_KEY} if API_KEY else None
+    with httpx.Client(base_url=args.vision_url, timeout=15.0, headers=headers) as client:
         # Health check
         try:
             client.get("/health").raise_for_status()

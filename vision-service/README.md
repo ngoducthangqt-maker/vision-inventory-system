@@ -240,3 +240,10 @@ All settings come from environment variables (see `.env.example`). Key ones:
 | `DEFAULT_REPORT_INTERVAL_SECONDS` | `10`               | Seconds between upstream reports           |
 | `INVENTORY_SERVICE_URL`           | `http://localhost:8000` | inventory-service base URL            |
 | `INVENTORY_REQUEST_TIMEOUT_SECONDS` | `10`             | Per-request HTTP timeout                   |
+| `API_KEY`                         | _(unset)_          | Secret required in `X-API-Key` on every `/api/v1` request; unset in production makes the API return `503` |
+| `INVENTORY_API_KEY`               | _(falls back to `API_KEY`)_ | Key sent to inventory-service     |
+| `CORS_ORIGINS`                    | `http://localhost:3000` | Allowed browser origins (`*` ignored in production) |
+| `ENABLE_DOCS`                     | _(unset)_          | Force `/docs`, `/redoc`, `/openapi.json` on/off (off in production by default) |
+| `ALLOWED_MEDIA_DIRS`              | `media`            | Directories a job's file `source` may resolve to |
+| `ALLOWED_MODEL_DIR`               | `weights`          | Directory a job's `model_path` override may resolve to |
+| `ALLOW_DEMO_SOURCES`              | `true`             | Accept simulated `demo://` sources         |

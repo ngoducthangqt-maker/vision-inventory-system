@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.clients.inventory_client import InventoryClientError, ItemNotFoundError
 from app.config import Settings, get_settings
+from app.core.validation import InvalidJobInputError
 from app.schemas.job_schema import (
     CountingTargetResponse,
     DetectionEventResponse,
@@ -81,6 +82,7 @@ def _event_to_response(row) -> DetectionEventResponse:  # type: ignore[no-untype
     response_model=JobResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
+        400: {"description": "Source or model path is not allowed."},
         404: {"description": "Target inventory item / SKU not found."},
         502: {"description": "inventory-service communication failure."},
     },
@@ -109,6 +111,10 @@ async def create_job(
 
     try:
         job = manager.create_job(payload)
+    except InvalidJobInputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from None
     except RuntimeError as exc:
         # E.g. ultralytics / opencv not installed.
         raise HTTPException(

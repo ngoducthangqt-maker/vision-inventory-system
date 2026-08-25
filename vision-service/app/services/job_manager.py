@@ -14,6 +14,7 @@ from uuid import UUID
 
 from app.clients.inventory_client import InventoryClient
 from app.config import Settings, get_settings
+from app.core.validation import validate_model_path, validate_source
 from app.infrastructure.repository import JobRepository
 from app.schemas.job_schema import JobCreateRequest
 from app.services.job import DetectionJob
@@ -50,12 +51,32 @@ class JobManager:
     # CRUD                                                                #
     # ------------------------------------------------------------------ #
     def create_job(self, request: JobCreateRequest) -> DetectionJob:
-        """Create a job from a request and (optionally) start it."""
+        """Create a job from a request and (optionally) start it.
+
+        ``source`` and ``model_path`` are attacker-controlled, so both are
+        validated against the configured allowlists before anything opens
+        them (see ``app.core.validation``). Raises ``InvalidJobInputError``
+        when they are not allowed.
+        """
+        source = validate_source(
+            request.source,
+            request.source_type,
+            allowed_media_dirs=self._settings.allowed_media_dirs_list,
+            allow_demo_sources=self._settings.allow_demo_sources,
+        )
+        model_path = (
+            validate_model_path(
+                request.model_path,
+                allowed_model_dir=self._settings.allowed_model_dir,
+            )
+            if request.model_path is not None
+            else self._settings.default_model_path
+        )
         job = DetectionJob(
-            source=request.source,
+            source=source,
             source_type=request.source_type,
             targets=request.targets,
-            model_path=request.model_path or self._settings.default_model_path,
+            model_path=model_path,
             frame_sample_interval=request.frame_sample_interval
             or self._settings.default_frame_sample_interval,
             report_interval_seconds=request.report_interval_seconds
@@ -186,6 +207,7 @@ def get_job_manager() -> JobManager:
                     base_url=settings.inventory_service_url,
                     api_prefix=settings.inventory_api_prefix,
                     timeout_seconds=settings.inventory_request_timeout_seconds,
+                    api_key=settings.inventory_api_key or settings.api_key,
                 )
                 # The repository is optional: the service still runs (in-memory
                 # only) when Postgres is not configured/unreachable at startup.

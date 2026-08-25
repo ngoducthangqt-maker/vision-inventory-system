@@ -8,6 +8,7 @@ using ``pydantic-settings``. A cached singleton is exposed via
 from __future__ import annotations
 
 from functools import lru_cache
+from urllib.parse import quote_plus
 
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,14 +31,23 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False)
     api_v1_prefix: str = "/api/v1"
 
+    # --- Security -------------------------------------------------------- #
+    # Shared secret required in the ``X-API-Key`` header on every /api/v1
+    # route. Mandatory in production: without it the API refuses to serve.
+    api_key: str = Field(default="")
+    # Serve /docs, /redoc and /openapi.json. Off in production by default.
+    enable_docs: bool | None = Field(default=None)
+
     # --- CORS ------------------------------------------------------------ #
-    cors_origins: str = Field(default="*")
+    # Comma-separated list of allowed browser origins. "*" is only honoured
+    # outside production and disables credentialed requests.
+    cors_origins: str = Field(default="http://localhost:3000")
 
     # --- PostgreSQL (vision-service own DB: jobs + detection events) ---- #
     postgres_host: str = Field(default="localhost")
     postgres_port: int = Field(default=5432)
     postgres_user: str = Field(default="vision")
-    postgres_password: str = Field(default="vision")
+    postgres_password: str = Field(default="")
     postgres_db: str = Field(default="vision_db")
     db_pool_size: int = Field(default=5)
     db_max_overflow: int = Field(default=10)
@@ -67,19 +77,28 @@ class Settings(BaseSettings):
     default_report_interval_seconds: float = Field(default=10.0, ge=1.0)
     # Whether to draw bounding boxes on a debug frame (kept in memory).
     enable_debug_frames: bool = Field(default=False)
+    # Directories a job's ``source`` file path may live in (comma-separated).
+    allowed_media_dirs: str = Field(default="media")
+    # Directory a job's ``model_path`` override may live in.
+    allowed_model_dir: str = Field(default="weights")
+    # Allow the simulated ``demo://`` pipeline (used by the demo UI button).
+    allow_demo_sources: bool = Field(default=True)
 
     # --- inventory-service integration ---------------------------------- #
     # Base URL of the inventory-service REST API.
     inventory_service_url: str = Field(default="http://localhost:8000")
     inventory_api_prefix: str = Field(default="/api/v1")
     inventory_request_timeout_seconds: float = Field(default=10.0, ge=1.0)
+    # API key sent to inventory-service; falls back to this service's own key.
+    inventory_api_key: str = Field(default="")
 
     @computed_field  # type: ignore[misc]
     @property
     def database_url(self) -> str:
         """Sync SQLAlchemy PostgreSQL DSN (psycopg2 driver)."""
         return (
-            f"postgresql+psycopg2://{self.postgres_user}:{self.postgres_password}"
+            f"postgresql+psycopg2://{quote_plus(self.postgres_user)}:"
+            f"{quote_plus(self.postgres_password)}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
@@ -89,10 +108,26 @@ class Settings(BaseSettings):
         return [c.strip().lower() for c in self.default_carton_class_names.split(",") if c.strip()]
 
     @property
+    def allowed_media_dirs_list(self) -> list[str]:
+        """Parse the comma-separated allowed media directories into a list."""
+        return [d.strip() for d in self.allowed_media_dirs.split(",") if d.strip()]
+
+    @property
+    def docs_enabled(self) -> bool:
+        """Whether the interactive API docs should be exposed."""
+        if self.enable_docs is not None:
+            return self.enable_docs
+        return self.environment != "production"
+
+    @property
     def cors_origins_list(self) -> list[str]:
-        """Parse the comma-separated CORS origins string into a list."""
+        """Parse the comma-separated CORS origins string into a list.
+
+        A wildcard is refused in production: allowing any origin on an API
+        that mutates inventory turns every browser into a proxy for it.
+        """
         if self.cors_origins.strip() == "*":
-            return ["*"]
+            return [] if self.environment == "production" else ["*"]
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 

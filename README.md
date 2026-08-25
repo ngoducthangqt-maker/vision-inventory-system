@@ -84,9 +84,32 @@ python vision-service/scripts/demo_count.py \
 #   -> prints live carton/pallet counters + the audit trail of reports sent
 ```
 
-Service docs:
+Service docs (development only — disabled when `ENVIRONMENT=production`):
 - inventory-service: http://localhost:8000/docs
 - vision-service: http://localhost:8001/docs
+
+## Security
+
+Both services authenticate every `/api/v1` request with a shared secret sent in
+the `X-API-Key` header.
+
+```bash
+# generate one key and use it for both services
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+| Variable | Where | Purpose |
+|---|---|---|
+| `API_KEY` | both services | key accepted in `X-API-Key` |
+| `INVENTORY_API_KEY` | vision-service | key sent to inventory-service (defaults to `API_KEY`) |
+| `SERVICE_API_KEY` | Next.js app | server-side key the `/api/svc/...` proxy injects; never sent to the browser |
+| `CORS_ORIGINS` | both services | allowed browser origins; `*` is ignored in production |
+| `ENABLE_DOCS` | both services | re-enables `/docs`, `/redoc`, `/openapi.json` in production |
+| `ALLOWED_MEDIA_DIRS` / `ALLOWED_MODEL_DIR` | vision-service | directories a job's `source` / `model_path` may resolve to |
+
+With `ENVIRONMENT=production` and no `API_KEY`, the API returns `503` instead of
+serving unauthenticated traffic. In development an unset `API_KEY` leaves the
+API open so the demo flows keep working.
 
 ## Quick start (local, no Docker)
 
@@ -136,6 +159,7 @@ restocks the matching inventory items:
 
 ```bash
 curl -X POST http://localhost:8001/api/v1/jobs \
+  -H "X-API-Key: $API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
     "source": "rtsp://admin:pass@10.0.0.5:554/stream",
@@ -151,14 +175,14 @@ curl -X POST http://localhost:8001/api/v1/jobs \
 Poll the job and its audit trail:
 
 ```bash
-curl http://localhost:8001/api/v1/jobs/<job_id>
-curl http://localhost:8001/api/v1/jobs/<job_id>/events
+curl -H "X-API-Key: $API_KEY" http://localhost:8001/api/v1/jobs/<job_id>
+curl -H "X-API-Key: $API_KEY" http://localhost:8001/api/v1/jobs/<job_id>/events
 ```
 
 Check the resulting stock in inventory-service:
 
 ```bash
-curl http://localhost:8000/api/v1/inventory-items
+curl -H "X-API-Key: $API_KEY" http://localhost:8000/api/v1/inventory-items
 ```
 
 ## Why tracking instead of per-frame detection?

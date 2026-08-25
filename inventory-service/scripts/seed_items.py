@@ -29,6 +29,7 @@ import httpx
 
 DEFAULT_URL = os.environ.get("INVENTORY_SERVICE_URL", "http://localhost:8000")
 API_PREFIX = "/api/v1"
+API_KEY = os.environ.get("API_KEY", "")
 
 SEED_ITEMS = [
     {
@@ -70,7 +71,8 @@ def _create_item(client: httpx.Client, item: dict) -> None:
 
 def main() -> int:
     print(f"Seeding inventory-service at {DEFAULT_URL} ...")
-    with httpx.Client(base_url=DEFAULT_URL, timeout=10.0) as client:
+    headers = {"X-API-Key": API_KEY} if API_KEY else None
+    with httpx.Client(base_url=DEFAULT_URL, timeout=10.0, headers=headers) as client:
         # Health check first.
         try:
             health = client.get("/health")

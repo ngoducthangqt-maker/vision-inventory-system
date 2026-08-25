@@ -1,7 +1,8 @@
-fastapi==0.115.6
+# 0.115.x pins starlette<0.42, which has known DoS advisories.
+fastapi==0.140.13
 uvicorn[standard]==0.34.0
 SQLAlchemy==2.0.36
 asyncpg==0.30.0
 pydantic==2.10.4
 pydantic-settings==2.7.1
-python-dotenv==1.0.1
+python-dotenv==1.2.2
