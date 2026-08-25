@@ -13,6 +13,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.domain.entities.inventory_item import InventoryItem
+
 
 class InventoryItemBase(BaseModel):
     """Shared fields for create/update payloads."""
@@ -64,6 +66,26 @@ class InventoryItemResponse(InventoryItemBase):
         if value is None:
             return Decimal("0.00")
         return Decimal(str(value))
+
+    @classmethod
+    def from_entity(cls, entity: InventoryItem) -> InventoryItemResponse:
+        """Build the enriched response DTO from a domain entity."""
+        return cls.model_validate(
+            {
+                "id": entity.id,
+                "sku": entity.sku,
+                "name": entity.name,
+                "description": entity.description,
+                "quantity": entity.quantity,
+                "price": entity.price,
+                "category": entity.category,
+                "low_stock_threshold": entity.low_stock_threshold,
+                "created_at": entity.created_at,
+                "updated_at": entity.updated_at,
+                "is_low_stock": entity.is_low_stock(),
+                "is_in_stock": entity.is_in_stock(),
+            }
+        )
 
 
 class InventoryItemsListResponse(BaseModel):

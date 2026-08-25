@@ -16,19 +16,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.infrastructure.models import DetectionEventModel, DetectionJobModel
-
-
-def _target_to_dict(target: Any) -> dict[str, Any]:
-    """Serialize a ``CountingTarget`` (pydantic) into a JSON-storable dict."""
-    return {
-        "name": target.name,
-        "class_names": list(target.class_names),
-        "target_item_id": str(target.target_item_id) if target.target_item_id else None,
-        "target_sku": target.target_sku,
-        "report_mode": target.report_mode.value
-        if hasattr(target.report_mode, "value")
-        else str(target.report_mode),
-    }
+from app.utils import present_values, target_to_dict
 
 
 class JobRepository:
@@ -65,7 +53,7 @@ class JobRepository:
             source=source,
             source_type=source_type,
             model_path=model_path,
-            targets=[_target_to_dict(t) for t in targets],
+            targets=[target_to_dict(t) for t in targets],
             status=status,
             counts=counts,
             last_reported_counts=last_reported_counts,
@@ -73,9 +61,7 @@ class JobRepository:
             frames_processed=0,
             created_at=created_at,
         )
-        with self._session_factory() as session:
-            session.add(row)
-            session.commit()
+        self._add(row)
 
     def update_job_status(
         self,
@@ -87,20 +73,16 @@ class JobRepository:
         last_report_at: datetime | None = None,
         stopped_at: datetime | None = None,
     ) -> None:
-        values: dict[str, Any] = {"status": status}
-        if error is not None:
-            values["error"] = error
-        if started_at is not None:
-            values["started_at"] = started_at
-        if last_report_at is not None:
-            values["last_report_at"] = last_report_at
-        if stopped_at is not None:
-            values["stopped_at"] = stopped_at
-        with self._session_factory() as session:
-            session.execute(
-                update(DetectionJobModel).where(DetectionJobModel.id == job_id).values(**values)
-            )
-            session.commit()
+        self._update_job(
+            job_id,
+            status=status,
+            **present_values(
+                error=error,
+                started_at=started_at,
+                last_report_at=last_report_at,
+                stopped_at=stopped_at,
+            ),
+        )
 
     def update_job_progress(
         self,
@@ -112,19 +94,14 @@ class JobRepository:
         frames_processed: int,
         last_report_at: datetime | None = None,
     ) -> None:
-        values: dict[str, Any] = {
-            "counts": counts,
-            "last_reported_counts": last_reported_counts,
-            "resolved_item_ids": resolved_item_ids,
-            "frames_processed": frames_processed,
-        }
-        if last_report_at is not None:
-            values["last_report_at"] = last_report_at
-        with self._session_factory() as session:
-            session.execute(
-                update(DetectionJobModel).where(DetectionJobModel.id == job_id).values(**values)
-            )
-            session.commit()
+        self._update_job(
+            job_id,
+            counts=counts,
+            last_reported_counts=last_reported_counts,
+            resolved_item_ids=resolved_item_ids,
+            frames_processed=frames_processed,
+            **present_values(last_report_at=last_report_at),
+        )
 
     def get_job(self, job_id: UUID) -> DetectionJobModel | None:
         with self._session_factory() as session:
@@ -158,9 +135,7 @@ class JobRepository:
             status=status,
             error=error,
         )
-        with self._session_factory() as session:
-            session.add(row)
-            session.commit()
+        self._add(row)
 
     def list_events(self, job_id: UUID) -> list[DetectionEventModel]:
         with self._session_factory() as session:
@@ -170,6 +145,23 @@ class JobRepository:
                 .order_by(DetectionEventModel.created_at.desc())
             )
             return list(session.scalars(stmt).all())
+
+    # ------------------------------------------------------------------ #
+    # Session helpers                                                     #
+    # ------------------------------------------------------------------ #
+    def _add(self, row: object) -> None:
+        """Insert a single row in its own session."""
+        with self._session_factory() as session:
+            session.add(row)
+            session.commit()
+
+    def _update_job(self, job_id: UUID, **values: Any) -> None:
+        """Apply a partial update to a job row in its own session."""
+        with self._session_factory() as session:
+            session.execute(
+                update(DetectionJobModel).where(DetectionJobModel.id == job_id).values(**values)
+            )
+            session.commit()
 
 
 __all__ = ["JobRepository"]

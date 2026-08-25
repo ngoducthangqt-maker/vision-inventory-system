@@ -11,7 +11,7 @@ Inventory API) is persisted as a ``detection_events`` row.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Uuid
@@ -19,10 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+from app.utils import utcnow
 
 
 class DetectionJobModel(Base):
@@ -47,7 +44,7 @@ class DetectionJobModel(Base):
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
+        DateTime(timezone=True), nullable=False, default=utcnow
     )
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -73,7 +70,7 @@ class DetectionEventModel(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False)  # success | failed
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
     )
 
     def __repr__(self) -> str:  # pragma: no cover

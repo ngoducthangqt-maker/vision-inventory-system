@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
+from app.api.errors import inventory_unreachable, item_not_found, job_not_found
 from app.clients.inventory_client import InventoryClientError, ItemNotFoundError
 from app.config import Settings, get_settings
 from app.schemas.job_schema import (
@@ -100,12 +101,9 @@ async def create_job(
                 if target.target_item_id is not None:
                     client.ensure_item_exists(target.target_item_id)
         except ItemNotFoundError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+            raise item_not_found(str(exc)) from None
         except InventoryClientError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"inventory-service unreachable: {exc}",
-            ) from None
+            raise inventory_unreachable(exc) from None
 
     try:
         job = manager.create_job(payload)
@@ -147,10 +145,7 @@ async def get_job(
     try:
         job = manager.get_job(job_id)
     except JobNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found.",
-        ) from None
+        raise job_not_found(job_id) from None
     return _to_response(job)
 
 
@@ -170,10 +165,7 @@ async def list_job_events(
     try:
         manager.get_job(job_id)
     except JobNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found.",
-        ) from None
+        raise job_not_found(job_id) from None
     rows = manager.list_events(job_id)
     return DetectionEventsListResponse(
         events=[_event_to_response(r) for r in rows],
@@ -197,10 +189,7 @@ async def stop_job(
     try:
         job = manager.stop_job(job_id)
     except JobNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found.",
-        ) from None
+        raise job_not_found(job_id) from None
     return JobStopResponse(
         id=job.id,
         status=job.status,
@@ -225,10 +214,7 @@ async def delete_job(
     try:
         manager.delete_job(job_id)
     except JobNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found.",
-        ) from None
+        raise job_not_found(job_id) from None
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

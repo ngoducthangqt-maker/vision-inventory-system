@@ -10,97 +10,19 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
-// --------------------------------------------------------------------------- //
-// Types (mirror the Python services' Pydantic schemas)                         //
-// --------------------------------------------------------------------------- //
-type InventoryItem = {
-  id: string;
-  sku: string;
-  name: string;
-  description?: string | null;
-  quantity: number;
-  price: string;
-  category?: string | null;
-  low_stock_threshold: number;
-  is_low_stock: boolean;
-  is_in_stock: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-type CountingTarget = {
-  name: string;
-  class_names: string[];
-  target_item_id: string | null;
-  target_sku: string | null;
-  resolved_item_id: string | null;
-  report_mode: "restock" | "consume";
-  current_count: number;
-  last_reported_count: number;
-};
-
-type JobStatus = "pending" | "running" | "stopped" | "error";
-
-type Job = {
-  id: string;
-  source: string;
-  source_type: string;
-  targets: CountingTarget[];
-  model_path: string;
-  frame_sample_interval: number;
-  report_interval_seconds: number;
-  status: JobStatus;
-  total_count: number;
-  total_last_reported: number;
-  frames_processed: number;
-  started_at: string | null;
-  last_report_at: string | null;
-  stopped_at: string | null;
-  error: string | null;
-  created_at: string;
-};
-
-type DetectionEvent = {
-  id: string;
-  job_id: string;
-  target_name: string;
-  delta: number;
-  item_id: string;
-  report_mode: "restock" | "consume";
-  status: "success" | "failed";
-  error: string | null;
-  created_at: string;
-};
-
-// --------------------------------------------------------------------------- //
-// API helpers (through the Next.js proxy → Python services)                    //
-// --------------------------------------------------------------------------- //
-async function api<T>(service: "inventory" | "vision", path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/svc/${service}/${path}`, {
-    cache: "no-store",
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-  });
-  if (!res.ok) {
-    let detail = `${res.status} ${res.statusText}`;
-    try {
-      const body = await res.json();
-      detail = body.detail ?? body.error ?? detail;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(detail);
-  }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
-}
-
-const listInventory = () => api<{ items: InventoryItem[]; total: number }>("inventory", "inventory-items");
-const listJobs = () => api<{ jobs: Job[]; total: number }>("vision", "jobs");
-const getJob = (id: string) => api<Job>("vision", `jobs/${id}`);
-const listEvents = (id: string) => api<{ events: DetectionEvent[]; total: number }>("vision", `jobs/${id}/events`);
-const stopJob = (id: string) => api<Job>("vision", `jobs/${id}/stop`, { method: "POST" });
-const deleteJob = (id: string) => api<void>("vision", `jobs/${id}`, { method: "DELETE" });
+import {
+  deleteJob,
+  errorMessage,
+  listEvents,
+  listInventory,
+  listJobs,
+  startJob,
+  stopJob,
+  type DetectionEvent,
+  type InventoryItem,
+  type Job,
+  type JobStatus,
+} from "@/lib/services";
 
 const DEMO_JOB_PAYLOAD = {
   source: "demo://warehouse-line-1",
@@ -171,7 +93,7 @@ export default function Page() {
       setJobs(jb.jobs);
     } catch (err) {
       // Silent on background polls; toast on first load.
-      if (loading) toast.error("Cannot reach services", { description: err instanceof Error ? err.message : String(err) });
+      if (loading) toast.error("Cannot reach services", { description: errorMessage(err) });
     } finally {
       setLoading(false);
     }
@@ -213,11 +135,11 @@ export default function Page() {
   const handleStartDemo = useCallback(async () => {
     setCreating(true);
     try {
-      await api<Job>("vision", "jobs", { method: "POST", body: JSON.stringify(DEMO_JOB_PAYLOAD) });
+      await startJob(DEMO_JOB_PAYLOAD);
       toast.success("Demo job started", { description: "Counting cartons + pallets from the simulated camera…" });
       await refreshAll();
     } catch (err) {
-      toast.error("Failed to start job", { description: err instanceof Error ? err.message : String(err) });
+      toast.error("Failed to start job", { description: errorMessage(err) });
     } finally {
       setCreating(false);
     }
@@ -229,7 +151,7 @@ export default function Page() {
       toast.info("Stop requested", { description: "Flushing final count delta…" });
       await refreshAll();
     } catch (err) {
-      toast.error("Failed to stop job", { description: err instanceof Error ? err.message : String(err) });
+      toast.error("Failed to stop job", { description: errorMessage(err) });
     }
   }, [refreshAll]);
 
@@ -244,7 +166,7 @@ export default function Page() {
       if (expandedJob === id) setExpandedJob(null);
       await refreshAll();
     } catch (err) {
-      toast.error("Failed to delete job", { description: err instanceof Error ? err.message : String(err) });
+      toast.error("Failed to delete job", { description: errorMessage(err) });
     }
   }, [refreshAll, expandedJob]);
 

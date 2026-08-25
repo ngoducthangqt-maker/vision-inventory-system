@@ -7,15 +7,12 @@ and resolved inventory item ids are tracked independently.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from threading import Event
 from uuid import UUID, uuid4
 
 from app.schemas.job_schema import CountingTarget, JobSourceType, JobStatus
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+from app.utils import utcnow
 
 
 class DetectionJob:
@@ -54,7 +51,7 @@ class DetectionJob:
         self.last_report_at: datetime | None = None
         self.stopped_at: datetime | None = None
         self.error: str | None = None
-        self.created_at: datetime = _utcnow()
+        self.created_at: datetime = utcnow()
 
         # Synchronisation primitive used to request a graceful stop.
         self._stop_event: Event = Event()

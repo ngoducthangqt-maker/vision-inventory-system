@@ -19,6 +19,11 @@ from app.domain.repositories.inventory_item_repository import (
 from app.infrastructure.repositories.inventory_item_repository_impl import (
     DuplicateSkuError,
 )
+from app.presentation.api.errors import (
+    insufficient_stock,
+    item_not_found,
+    sku_conflict,
+)
 from app.presentation.schemas.inventory_item_schema import (
     ConsumeRequest,
     InventoryItemCreate,
@@ -35,25 +40,6 @@ from app.use_cases.inventory_item_use_cases import (
 )
 
 router = APIRouter(prefix="/inventory-items", tags=["inventory-items"])
-
-
-def _to_response(entity) -> InventoryItemResponse:  # type: ignore[no-untyped-def]
-    """Convert a domain entity into the enriched API response DTO."""
-    data = {
-        "id": entity.id,
-        "sku": entity.sku,
-        "name": entity.name,
-        "description": entity.description,
-        "quantity": entity.quantity,
-        "price": entity.price,
-        "category": entity.category,
-        "low_stock_threshold": entity.low_stock_threshold,
-        "created_at": entity.created_at,
-        "updated_at": entity.updated_at,
-        "is_low_stock": entity.is_low_stock(),
-        "is_in_stock": entity.is_in_stock(),
-    }
-    return InventoryItemResponse.model_validate(data)
 
 
 # --------------------------------------------------------------------------- #
@@ -84,13 +70,8 @@ async def create_inventory_item(
             low_stock_threshold=payload.low_stock_threshold,
         )
     except (DuplicateSkuError, SkuAlreadyExistsError):
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"An item with sku={payload.sku!r} already exists.",
-        ) from None
-    return _to_response(entity)
+        raise sku_conflict(payload.sku) from None
+    return InventoryItemResponse.from_entity(entity)
 
 
 # --------------------------------------------------------------------------- #
@@ -114,7 +95,7 @@ async def list_inventory_items(
     items = await use_cases.list_items(filter_params)
     total = await use_cases.count_items()
     return InventoryItemsListResponse(
-        items=[_to_response(i) for i in items],
+        items=[InventoryItemResponse.from_entity(i) for i in items],
         total=total,
         skip=skip,
         limit=limit,
@@ -137,13 +118,8 @@ async def get_inventory_item(
     try:
         entity = await use_cases.get_item(item_id)
     except InventoryItemNotFoundError:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Inventory item with id={item_id} not found.",
-        ) from None
-    return _to_response(entity)
+        raise item_not_found(item_id) from None
+    return InventoryItemResponse.from_entity(entity)
 
 
 # --------------------------------------------------------------------------- #
@@ -170,13 +146,8 @@ async def update_inventory_item(
             low_stock_threshold=payload.low_stock_threshold,
         )
     except InventoryItemNotFoundError:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Inventory item with id={item_id} not found.",
-        ) from None
-    return _to_response(entity)
+        raise item_not_found(item_id) from None
+    return InventoryItemResponse.from_entity(entity)
 
 
 # --------------------------------------------------------------------------- #
@@ -195,12 +166,7 @@ async def delete_inventory_item(
     try:
         await use_cases.delete_item(item_id)
     except InventoryItemNotFoundError:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Inventory item with id={item_id} not found.",
-        ) from None
+        raise item_not_found(item_id) from None
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -221,13 +187,8 @@ async def restock_inventory_item(
     try:
         entity = await use_cases.restock_item(item_id, payload.amount)
     except InventoryItemNotFoundError:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Inventory item with id={item_id} not found.",
-        ) from None
-    return _to_response(entity)
+        raise item_not_found(item_id) from None
+    return InventoryItemResponse.from_entity(entity)
 
 
 @router.post(
@@ -247,23 +208,10 @@ async def consume_inventory_item(
     try:
         entity = await use_cases.consume_item(item_id, payload.amount)
     except InventoryItemNotFoundError:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Inventory item with id={item_id} not found.",
-        ) from None
+        raise item_not_found(item_id) from None
     except ConsumeExceedsStockError as exc:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Cannot consume {exc.requested} units of sku={exc.sku!r}: "
-                f"only {exc.available} in stock."
-            ),
-        ) from None
-    return _to_response(entity)
+        raise insufficient_stock(exc) from None
+    return InventoryItemResponse.from_entity(entity)
 
 
 __all__ = ["router"]

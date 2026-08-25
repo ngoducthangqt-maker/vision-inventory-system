@@ -7,11 +7,11 @@ in plain dicts. Selected via the ``REPOSITORY_MODE=inmemory`` setting (see
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from app.infrastructure.repository import _target_to_dict
+from app.utils import present_values, target_to_dict, utcnow
 
 
 class _JobRow:
@@ -31,7 +31,7 @@ class _EventRow:
         self.report_mode = kw["report_mode"]
         self.status = kw["status"]
         self.error = kw.get("error")
-        self.created_at = kw.get("created_at", datetime.now(timezone.utc))
+        self.created_at = kw.get("created_at", utcnow())
 
 
 class InMemoryJobRepository:
@@ -50,7 +50,7 @@ class InMemoryJobRepository:
             "source": source,
             "source_type": source_type,
             "model_path": model_path,
-            "targets": [_target_to_dict(t) for t in targets],
+            "targets": [target_to_dict(t) for t in targets],
             "status": status,
             "counts": dict(counts),
             "last_reported_counts": dict(last_reported_counts),
@@ -66,32 +66,36 @@ class InMemoryJobRepository:
     def update_job_status(self, job_id: UUID, *, status: str, error: str | None = None,
                           started_at: datetime | None = None, last_report_at: datetime | None = None,
                           stopped_at: datetime | None = None) -> None:
-        row = self._jobs.get(job_id)
-        if row is None:
-            return
-        row["status"] = status
-        if error is not None:
-            row["error"] = error
-        if started_at is not None:
-            row["started_at"] = started_at
-        if last_report_at is not None:
-            row["last_report_at"] = last_report_at
-        if stopped_at is not None:
-            row["stopped_at"] = stopped_at
+        self._apply(
+            job_id,
+            status=status,
+            **present_values(
+                error=error,
+                started_at=started_at,
+                last_report_at=last_report_at,
+                stopped_at=stopped_at,
+            ),
+        )
 
     def update_job_progress(self, job_id: UUID, *, counts: dict[str, int],
                             last_reported_counts: dict[str, int],
                             resolved_item_ids: dict[str, Any], frames_processed: int,
                             last_report_at: datetime | None = None) -> None:
+        self._apply(
+            job_id,
+            counts=dict(counts),
+            last_reported_counts=dict(last_reported_counts),
+            resolved_item_ids=dict(resolved_item_ids),
+            frames_processed=frames_processed,
+            **present_values(last_report_at=last_report_at),
+        )
+
+    def _apply(self, job_id: UUID, **values: Any) -> None:
+        """Merge a partial update into a stored job (no-op when unknown)."""
         row = self._jobs.get(job_id)
         if row is None:
             return
-        row["counts"] = dict(counts)
-        row["last_reported_counts"] = dict(last_reported_counts)
-        row["resolved_item_ids"] = dict(resolved_item_ids)
-        row["frames_processed"] = frames_processed
-        if last_report_at is not None:
-            row["last_report_at"] = last_report_at
+        row.update(values)
 
     def get_job(self, job_id: UUID) -> _JobRow | None:
         row = self._jobs.get(job_id)
