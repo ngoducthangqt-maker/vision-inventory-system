@@ -7,11 +7,13 @@ entity, keeping the persistence technology fully hidden.
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from app.domain.entities.inventory_item import InventoryItem
 from app.domain.repositories.inventory_item_repository import (
@@ -67,6 +69,26 @@ class SqlAlchemyInventoryItemRepository(InventoryItemRepository):
         row.updated_at = item.updated_at
 
     # ------------------------------------------------------------------ #
+    # Query helpers                                                       #
+    # ------------------------------------------------------------------ #
+    async def _find_row(
+        self, column: InstrumentedAttribute[Any], value: object
+    ) -> InventoryItemModel | None:
+        """Fetch at most one row matching ``column == value``."""
+        result = await self._session.execute(
+            select(InventoryItemModel).where(column == value)
+        )
+        return result.scalar_one_or_none()
+
+    async def _flush(self, sku: str) -> None:
+        """Flush pending changes, mapping a unique violation to a domain error."""
+        try:
+            await self._session.flush()
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise DuplicateSkuError(sku) from exc
+
+    # ------------------------------------------------------------------ #
     # Write operations                                                    #
     # ------------------------------------------------------------------ #
     async def add(self, item: InventoryItem) -> InventoryItem:
@@ -83,33 +105,21 @@ class SqlAlchemyInventoryItemRepository(InventoryItemRepository):
             updated_at=item.updated_at,
         )
         self._session.add(row)
-        try:
-            await self._session.flush()
-        except IntegrityError as exc:
-            await self._session.rollback()
-            raise DuplicateSkuError(item.sku) from exc
+        await self._flush(item.sku)
         await self._session.refresh(row)
         return self._to_entity(row)
 
     async def update(self, item: InventoryItem) -> InventoryItem:
-        stmt = select(InventoryItemModel).where(InventoryItemModel.id == item.id)
-        result = await self._session.execute(stmt)
-        row = result.scalar_one_or_none()
+        row = await self._find_row(InventoryItemModel.id, item.id)
         if row is None:
             raise InventoryItemNotFoundError(item.id)
         self._apply_to_model(item, row)
-        try:
-            await self._session.flush()
-        except IntegrityError as exc:
-            await self._session.rollback()
-            raise DuplicateSkuError(item.sku) from exc
+        await self._flush(item.sku)
         await self._session.refresh(row)
         return self._to_entity(row)
 
     async def delete(self, item_id: UUID) -> None:
-        stmt = select(InventoryItemModel).where(InventoryItemModel.id == item_id)
-        result = await self._session.execute(stmt)
-        row = result.scalar_one_or_none()
+        row = await self._find_row(InventoryItemModel.id, item_id)
         if row is not None:
             await self._session.delete(row)
             await self._session.flush()
@@ -118,17 +128,13 @@ class SqlAlchemyInventoryItemRepository(InventoryItemRepository):
     # Read operations                                                     #
     # ------------------------------------------------------------------ #
     async def get_by_id(self, item_id: UUID) -> InventoryItem:
-        stmt = select(InventoryItemModel).where(InventoryItemModel.id == item_id)
-        result = await self._session.execute(stmt)
-        row = result.scalar_one_or_none()
+        row = await self._find_row(InventoryItemModel.id, item_id)
         if row is None:
             raise InventoryItemNotFoundError(item_id)
         return self._to_entity(row)
 
     async def get_by_sku(self, sku: str) -> InventoryItem | None:
-        stmt = select(InventoryItemModel).where(InventoryItemModel.sku == sku)
-        result = await self._session.execute(stmt)
-        row = result.scalar_one_or_none()
+        row = await self._find_row(InventoryItemModel.sku, sku)
         return self._to_entity(row) if row else None
 
     async def list(

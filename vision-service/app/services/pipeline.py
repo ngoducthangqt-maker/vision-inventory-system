@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID
 
 from app.clients.inventory_client import (
@@ -35,12 +35,9 @@ from app.core.source import VideoSource, VideoSourceError
 from app.infrastructure.repository import JobRepository
 from app.schemas.job_schema import EventStatus, JobReportMode, JobStatus
 from app.services.job import DetectionJob
+from app.utils import serialize_item_ids, swallow_persistence_errors, utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class DetectionPipeline:
@@ -124,7 +121,7 @@ class DetectionPipeline:
         from app.core.simulated import SimulatedDetector, SimulatedSource, is_demo_source
 
         self._job.status = JobStatus.running
-        self._job.started_at = _utcnow()
+        self._job.started_at = utcnow()
         if is_demo_source(self._job.source):
             self._detector = SimulatedDetector(
                 model_path=self._job.model_path,
@@ -199,7 +196,7 @@ class DetectionPipeline:
     # ------------------------------------------------------------------ #
     def _report_deltas(self) -> None:
         """Push per-category count deltas upstream and persist audit events."""
-        report_time = _utcnow()
+        report_time = utcnow()
         any_reported = False
 
         for target in self._job.targets:
@@ -265,35 +262,41 @@ class DetectionPipeline:
     # ------------------------------------------------------------------ #
     # Persistence helpers                                                 #
     # ------------------------------------------------------------------ #
-    def _persist_status(self) -> None:
+    def _persist_status(
+        self,
+        *,
+        error: str | None = None,
+        stopped_at: datetime | None = None,
+        last_report_at: datetime | None = None,
+    ) -> None:
         if self._repo is None:
             return
-        try:
+        with swallow_persistence_errors(
+            logger, "Job %s: failed to persist status", self._job.id
+        ):
             self._repo.update_job_status(
                 self._job.id,
                 status=self._job.status.value,
+                error=error,
                 started_at=self._job.started_at,
+                stopped_at=stopped_at,
+                last_report_at=last_report_at,
             )
-        except Exception:  # noqa: BLE001 - persistence must not kill the worker
-            logger.exception("Job %s: failed to persist status", self._job.id)
 
     def _persist_progress(self, *, last_report_at: datetime | None = None) -> None:
         if self._repo is None:
             return
-        try:
+        with swallow_persistence_errors(
+            logger, "Job %s: failed to persist progress", self._job.id
+        ):
             self._repo.update_job_progress(
                 self._job.id,
                 counts=dict(self._job.counts),
                 last_reported_counts=dict(self._job.last_reported_counts),
-                resolved_item_ids={
-                    k: (str(v) if v is not None else None)
-                    for k, v in self._job.resolved_item_ids.items()
-                },
+                resolved_item_ids=serialize_item_ids(self._job.resolved_item_ids),
                 frames_processed=self._job.frames_processed,
                 last_report_at=last_report_at,
             )
-        except Exception:  # noqa: BLE001 - persistence must not kill the worker
-            logger.exception("Job %s: failed to persist progress", self._job.id)
 
     def _persist_event(
         self,
@@ -307,7 +310,9 @@ class DetectionPipeline:
     ) -> None:
         if self._repo is None:
             return
-        try:
+        with swallow_persistence_errors(
+            logger, "Job %s: failed to persist event", self._job.id
+        ):
             self._repo.insert_event(
                 job_id=self._job.id,
                 target_name=target_name,
@@ -317,8 +322,6 @@ class DetectionPipeline:
                 status=status,
                 error=error,
             )
-        except Exception:  # noqa: BLE001 - persistence must not kill the worker
-            logger.exception("Job %s: failed to persist event", self._job.id)
 
     # ------------------------------------------------------------------ #
     # Cleanup                                                             #
@@ -329,28 +332,13 @@ class DetectionPipeline:
             self._source = None
         # Drop detector to release GPU/CPU memory held by the model.
         self._detector = None
-        self._job.stopped_at = _utcnow()
-        if self._repo is not None:
-            try:
-                self._repo.update_job_status(
-                    self._job.id,
-                    status=self._job.status.value,
-                    error=self._job.error,
-                    stopped_at=self._job.stopped_at,
-                    last_report_at=self._job.last_report_at,
-                )
-                self._repo.update_job_progress(
-                    self._job.id,
-                    counts=dict(self._job.counts),
-                    last_reported_counts=dict(self._job.last_reported_counts),
-                    resolved_item_ids={
-                        k: (str(v) if v is not None else None)
-                        for k, v in self._job.resolved_item_ids.items()
-                    },
-                    frames_processed=self._job.frames_processed,
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception("Job %s: failed to persist final state", self._job.id)
+        self._job.stopped_at = utcnow()
+        self._persist_status(
+            error=self._job.error,
+            stopped_at=self._job.stopped_at,
+            last_report_at=self._job.last_report_at,
+        )
+        self._persist_progress()
 
 
 __all__ = ["DetectionPipeline"]

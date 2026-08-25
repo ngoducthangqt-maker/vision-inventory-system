@@ -18,6 +18,7 @@ from app.infrastructure.repository import JobRepository
 from app.schemas.job_schema import JobCreateRequest
 from app.services.job import DetectionJob
 from app.services.pipeline import DetectionPipeline
+from app.utils import serialize_item_ids, swallow_persistence_errors
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,9 @@ class JobManager:
     def _persist_job_insert(self, job: DetectionJob) -> None:
         if self._repo is None:
             return
-        try:
+        with swallow_persistence_errors(
+            logger, "Job %s: failed to persist initial row", job.id
+        ):
             self._repo.insert_job(
                 job_id=job.id,
                 source=job.source,
@@ -158,14 +161,9 @@ class JobManager:
                 status=job.status.value,
                 counts=dict(job.counts),
                 last_reported_counts=dict(job.last_reported_counts),
-                resolved_item_ids={
-                    k: (str(v) if v is not None else None)
-                    for k, v in job.resolved_item_ids.items()
-                },
+                resolved_item_ids=serialize_item_ids(job.resolved_item_ids),
                 created_at=job.created_at,
             )
-        except Exception:  # noqa: BLE001 - persistence must not block job creation
-            logger.exception("Job %s: failed to persist initial row", job.id)
 
 
 # --------------------------------------------------------------------------- #

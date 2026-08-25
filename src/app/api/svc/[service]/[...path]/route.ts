@@ -1,5 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 
+import { errorMessage } from "@/lib/utils";
+
 /**
  * Generic proxy to the Python microservices.
  *
@@ -64,10 +66,9 @@ async function forward(
       cache: "no-store",
     });
   } catch (exc) {
-    const message = exc instanceof Error ? exc.message : String(exc);
     return NextResponse.json(
       {
-        error: `Cannot reach ${service}-service on port ${port}: ${message}`,
+        error: `Cannot reach ${service}-service on port ${port}: ${errorMessage(exc)}`,
       },
       { status: 502 },
     );
@@ -90,22 +91,10 @@ type RouteContext = {
   params: Promise<{ service: string; path: string[] }>;
 };
 
-export async function GET(req: NextRequest, ctx: RouteContext) {
+// Every verb proxies identically; `forward` already honours `req.method`.
+async function handler(req: NextRequest, ctx: RouteContext) {
   const { service, path } = await ctx.params;
   return forward(req, service, path);
 }
 
-export async function POST(req: NextRequest, ctx: RouteContext) {
-  const { service, path } = await ctx.params;
-  return forward(req, service, path);
-}
-
-export async function PATCH(req: NextRequest, ctx: RouteContext) {
-  const { service, path } = await ctx.params;
-  return forward(req, service, path);
-}
-
-export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { service, path } = await ctx.params;
-  return forward(req, service, path);
-}
+export { handler as GET, handler as POST, handler as PATCH, handler as DELETE };
