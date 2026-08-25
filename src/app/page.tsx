@@ -184,7 +184,6 @@ export default function Page() {
 
   // Initial load + polling while there are running/pending jobs.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshAll();
   }, [refreshAll]);
 

@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
@@ -73,6 +74,15 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(ValidationError)
+    async def handle_internal_validation_error(
+        request: Request, exc: ValidationError
+    ) -> JSONResponse:
+        # A pydantic failure outside request parsing is a server-side defect;
+        # it must not be reported to the client as a validation error.
+        logger.exception("Internal validation error")
+        return JSONResponse(status_code=500, content={"detail": "Internal server error."})
 
     @app.exception_handler(ValueError)
     async def handle_value_error(request: Request, exc: ValueError) -> JSONResponse:
