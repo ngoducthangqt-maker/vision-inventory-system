@@ -182,7 +182,7 @@ export default function Page() {
     }
   }, [loading]);
 
-  // Initial load + polling while there are running/pending jobs.
+  // Initial load + polling while jobs are active or a connection error is showing.
   useEffect(() => {
     refreshAll();
   }, [refreshAll]);
@@ -190,16 +190,16 @@ export default function Page() {
   const hasActive = jobs.some((j) => j.status === "running" || j.status === "pending");
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
-    if (hasActive) {
+    if (hasActive || connectionError !== null) {
       pollRef.current = setInterval(() => {
         setNow(Date.now());
         refreshAll();
-      }, 2000);
+      }, hasActive ? 2000 : 5000);
     }
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [hasActive, refreshAll]);
+  }, [connectionError, hasActive, refreshAll]);
 
   // Load events for the expanded job whenever jobs refresh.
   useEffect(() => {
